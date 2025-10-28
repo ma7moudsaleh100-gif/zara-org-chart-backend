@@ -1,0 +1,1527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"> 
+    <title>Smart Interactive Org Chart System (Server Ready with Export/Import)</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <style type="text/tailwindcss">
+        body {
+            box-sizing: border-box;
+        }
+        
+        /* ضبط العرض الأقصى للحاوية الرئيسية لتبدو جيدة على الشاشات الكبيرة والصغيرة */
+        .container {
+            max-width: 100%;
+            padding-left: 1.5rem;
+            padding-right: 1.5rem;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .org-chart {
+            position: relative;
+            overflow: auto;
+            min-height: 600px;
+        }
+        
+        .org-node {
+            position: absolute;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        
+        .org-line {
+            position: absolute;
+            background: #000;
+            z-index: 1;
+        }
+        
+        /* ألوان الأقسام */
+        .section-woman { background-color: #fce7f3;
+        }
+        .section-man { background-color: #dbeafe;
+        }
+        .section-kids { background-color: #fef3c7;
+        }
+        .section-cash { background-color: #e9d5ff;
+        }
+        .section-stockroom { background-color: #f3f4f6;
+        }
+        
+        .star-rating {
+            display: inline-flex;
+            gap: 2px;
+            position: relative;
+        }
+        
+        .star {
+            cursor: pointer;
+            color: #FFC107;
+            transition: all 0.2s ease;
+            font-size: 18px;
+            user-select: none;
+        }
+        
+        .star.filled {
+            color: #4CAF50;
+        }
+        
+        /* **إصلاح المودال (النافذة المنبثقة) ليعمل في كل مكان:** */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+            align-items: center; 
+            justify-content: center;
+        }
+
+        /* تنسيقات إضافية للثبات */
+        .rating-tooltip {
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #333;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            white-space: nowrap;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s;
+            z-index: 10;
+        }
+        
+        .rating-tooltip::after {
+            content: '';
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            border: 4px solid transparent;
+            border-top-color: #333;
+        }
+        
+        .rating-tooltip.show {
+            opacity: 1;
+        }
+        
+        .rating-label {
+            font-size: 12px;
+            color: #6b7280;
+            margin-top: 4px;
+            text-align: center;
+        }
+        
+        .unsaved-changes {
+            background: linear-gradient(45deg, #10b981, #059669) !important;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1;
+            }
+            50% { opacity: 0.8;
+            }
+        }
+        
+        .chart-container {
+            width: 100%;
+            /* ضمان أن يأخذ العرض بالكامل داخل الحاوية */
+            height: 200px;
+            position: relative;
+            background: #f9fafb;
+            border-radius: 8px;
+            padding: 16px;
+        }
+        
+        .trend-line {
+            stroke: #3b82f6;
+            stroke-width: 2;
+            fill: none;
+        }
+        
+        .zoom-controls {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            display: flex;
+            gap: 8px;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body class="bg-white">
+    <div class="container p-4"> 
+        <div class="flex justify-between items-center mb-8 flex-wrap gap-4">
+            <h1 class="text-xl md:text-3xl font-bold text-gray-800 text-center flex-1 min-w-[200px]">ZARA ALEXANDRIA TEAM</h1>
+            <div class="flex gap-2 sm:gap-4 flex-wrap justify-end">
+                <button onclick="exportData()" class="bg-indigo-600 text-white text-sm px-3 py-2 rounded-lg hover:bg-indigo-700 transition-colors">
+           
+                    📥 تصدير (Export)
+                </button>
+                <button onclick="document.getElementById('fileInput').click()" class="bg-purple-600 text-white text-sm px-3 py-2 rounded-lg hover:bg-purple-700 transition-colors">
+                    📤 استيراد (Import)
+                </button>
+          
+                <input type="file" id="fileInput" accept=".json" onchange="handleImport(event)" style="display: none;">
+                <button onclick="showAddEmployeeModal()" class="bg-blue-600 text-white text-sm px-3 py-2 rounded-lg hover:bg-blue-700 transition-colors">
+                    + Employee
+                </button>
+                <button onclick="toggleView('chart')" id="chartBtn" class="bg-gray-600 text-white text-sm px-3 py-2 rounded-lg hover:bg-gray-700 
+                    transition-colors">
+                    Org Chart
+                </button>
+                <button onclick="toggleView('dashboard')" id="dashboardBtn" class="bg-gray-200 text-gray-700 text-sm px-3 py-2 rounded-lg hover:bg-gray-300 transition-colors">
+                    Dashboard
+                </button>
+ 
+            </div>
+        </div>
+
+        <div class="mb-6 flex gap-4 flex-wrap">
+            <input type="text" id="searchInput" placeholder="Search employees..." class="px-4 py-2 border rounded-lg flex-1 min-w-64">
+            <select id="sectionFilter" class="px-4 py-2 border rounded-lg">
+                <option value="">All Sections</option>
+            
+                <option value="WOMAN">WOMAN</option>
+                <option value="MAN">MAN</option>
+                <option value="KIDS">KIDS</option>
+                <option value="CASH">CASH</option>
+                <option value="STOCKROOM">STOCKROOM</option>
+            </select>
+            <select id="titleFilter" class="px-4 
+                py-2 border rounded-lg">
+                <option value="">All Job Titles</option>
+            </select>
+        </div>
+
+        <div id="chartView" class="relative">
+            <div class="zoom-controls">
+                <button onclick="zoomIn()" class="bg-white border rounded-lg px-3 py-2 hover:bg-gray-50">+</button>
+             
+                <button onclick="zoomOut()" class="bg-white border rounded-lg px-3 py-2 hover:bg-gray-50">-</button>
+                <button onclick="resetZoom()" class="bg-white border rounded-lg px-3 py-2 hover:bg-gray-50">Reset</button>
+            </div>
+            <div id="orgChart" class="org-chart border rounded-lg bg-gray-50" style="transform-origin: top left;
+                transform: scale(1);">
+                </div>
+        </div>
+
+        <div id="dashboardView" class="hidden">
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8"> 
+                <div class="bg-white p-6 rounded-lg border col-span-1 md:col-span-2">
+                    <h3 class="text-xl font-semibold mb-4">Analytics</h3>
+ 
+                    <div class="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                        <button onclick="showCompetencyRanking()" class="bg-yellow-500 text-white p-4 rounded-lg hover:bg-yellow-600 transition-colors text-sm">
+                            ⭐ Ranking
+                
+                        </button>
+                        <button onclick="showTrainingNeeds()" class="bg-blue-500 text-white p-4 rounded-lg hover:bg-blue-600 transition-colors text-sm">
+                            📊 Training Needs
+                        </button>
+      
+                        <button onclick="showTopTalents()" class="bg-green-500 text-white p-4 rounded-lg hover:bg-green-600 transition-colors text-sm">
+                            🏆 Top Talents
+                        </button>
+                    
+                        <button onclick="showNeedAttention()" class="bg-red-500 text-white p-4 rounded-lg hover:bg-red-600 transition-colors text-sm">
+                            ⚠️ Attention
+                        </button>
+                        <button onclick="showEmployeesAverageAge()" class="bg-teal-500 text-white p-4 rounded-lg hover:bg-teal-600 transition-colors text-sm">
+   
+                            🎂 Avg Age
+                        </button>
+                        <button onclick="showAverageYearsOfService()" class="bg-indigo-500 text-white p-4 rounded-lg hover:bg-indigo-600 transition-colors text-sm">
+                 
+                            📅 Avg Service
+                        </button>
+                    </div>
+                    <div class="mt-4">
+                      
+                        <button onclick="showManageTrainings()" class="bg-purple-500 text-white px-4 py-2 rounded-lg hover:bg-purple-600 transition-colors w-full">
+                            ⚙️ Manage Training Topics
+                        </button>
+                    </div>
+              
+                </div>
+
+                <div class="bg-white p-6 rounded-lg border col-span-1">
+                    <h3 class="text-xl font-semibold mb-4">Quick Stats</h3>
+                    <div id="quickStats" class="space-y-2">
+                        </div>
+       
+                </div>
+            </div>
+
+            <div id="dashboardContent" class="bg-white p-6 rounded-lg border">
+                <p class="text-gray-500 text-center">Select an analytics option above to view detailed reports.</p>
+            </div>
+        </div>
+    </div>
+
+    <div id="employeeModal" class="modal">
+      
+        <div class="bg-white rounded-lg p-6 max-w-full w-full mx-4 lg:max-w-4xl max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-bold">Employee Details</h2>
+                <button onclick="closeEmployeeModal()" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
+            </div>
+            
+          
+            <div id="employeeCardContent">
+                </div>
+        </div>
+    </div>
+
+    <div id="addTrainingModal" class="modal">
+        <div class="bg-white rounded-lg p-6 max-w-full w-full mx-4 lg:max-w-2xl">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-bold">Add New Training Topic</h2>
+           
+                <button onclick="closeAddTrainingModal()" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
+            </div>
+            
+            <form id="addTrainingForm" class="space-y-4">
+                <div>
+                    <label for="trainingName" class="block text-sm font-medium mb-1">Training Name</label>
+           
+                    <input type="text" id="trainingName" required class="w-full px-3 py-2 border rounded-lg" placeholder="Enter training topic name...">
+                </div>
+                
+                <div>
+                    <label for="trainingDescription" class="block text-sm font-medium mb-1">Description (optional)</label>
+     
+                    <textarea id="trainingDescription" class="w-full px-3 py-2 border rounded-lg" rows="3" placeholder="Brief description of the training..."></textarea>
+                </div>
+                
+                <div class="flex justify-end gap-4 pt-4">
+                    <button 
+                        type="button" onclick="closeAddTrainingModal()" class="px-4 py-2 text-gray-600 border rounded-lg hover:bg-gray-50">
+                        Cancel
+                    </button>
+                    <button type="submit" class="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">
+                      
+                        Add Training Topic
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="addEmployeeModal" class="modal">
+        <div class="bg-white rounded-lg p-6 max-w-full w-full mx-4 lg:max-w-2xl">
+            <div class="flex justify-between 
+                items-center mb-6">
+                <h2 class="text-2xl font-bold">Add New Employee</h2>
+                <button onclick="closeAddEmployeeModal()" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
+            </div>
+            
+            <form id="addEmployeeForm" class="space-y-4">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+ 
+                    <div>
+                        <label for="newName" class="block text-sm font-medium mb-1">Full Name</label>
+                        <input type="text" id="newName" required class="w-full px-3 py-2 border rounded-lg">
+                   
+                    </div>
+                    <div>
+                        <label for="newTitle" class="block text-sm font-medium mb-1">Job Title</label>
+                        <input type="text" id="newTitle" required class="w-full px-3 py-2 border rounded-lg">
+                 
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <label 
+                            for="newSection" class="block text-sm font-medium mb-1">Section</label>
+                        <select id="newSection" required class="w-full px-3 py-2 border rounded-lg">
+                            <option value="">Select Section</option>
+                            <option value="WOMAN">WOMAN</option>
+      
+                            <option value="MAN">MAN</option>
+                            <option value="KIDS">KIDS</option>
+                            <option value="CASH">CASH</option>
+                   
+                            <option value="STOCKROOM">STOCKROOM</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="newManager" 
+                            class="block text-sm font-medium mb-1">Direct Manager</label>
+                        <select id="newManager" class="w-full px-3 py-2 border rounded-lg">
+                            <option value="">No Manager (CEO Level)</option>
+                        </select>
+          
+                    </div>
+                </div>
+                
+                <div>
+                    <label for="newPhoto" class="block text-sm font-medium mb-1">Profile Photo</label>
+                
+                    <input type="file" id="newPhoto" accept="image/*" class="w-full px-3 py-2 border rounded-lg">
+                </div>
+                
+                <div class="flex justify-end gap-4 pt-4">
+                    <button type="button" onclick="closeAddEmployeeModal()" class="px-4 py-2 text-gray-600 border rounded-lg hover:bg-gray-50">
+        
+                        Cancel
+                    </button>
+                    <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                        Add Employee
+            
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // ====================================================================
+        // OFFLINE STORAGE SETUP (SERVER/DATABASE) - التعديلات تبدأ هنا
+        // ====================================================================
+        const API_URL = 'http://localhost:3000/api/employees'; // <<<<<<< رابط الخادم Node.js
+        const STORAGE_KEY = 'orgChartData_ZARA_v2'; 
+        
+        // Initial Data - Used only if server connection fails or for first run (should match initialData.js)
+        const initialAvailableTrainingTopics = [
+            "English Communication",
+            "Customer Service Excellence", 
+            "Product Knowledge Training",
+            "Time Management & Punctuality",
+            "Motivation & Engagement",
+            "Leadership Development",
+            "Digital Skills",
+            "Inventory Management",
+            "Sales Techniques",
+            "Team Building",
+            "Conflict Resolution",
+            "New Employee Onboarding"
+        ];
+        const initialCustomTrainingTopics = [
+            { id: 1, name: 'English Communication', description: 'Improve English language skills for better communication', condition: (emp) => emp.competencies.english <= 3 },
+            { id: 2, name: 'Customer Service Excellence', description: 'Enhance attitude and customer interaction skills', condition: (emp) => emp.competencies.attitude <= 3 },
+            { id: 3, name: 'Product Knowledge Training', description: 'Deepen understanding of products and services', condition: (emp) => emp.competencies.knowledge <= 3 },
+            { id: 4, name: 'Time Management & Punctuality', description: 'Improve time management and attendance', condition: (emp) => emp.competencies.punctuality <= 3 },
+            { id: 5, name: 'Motivation & Engagement', description: 'Boost workplace motivation and passion', condition: (emp) => emp.competencies.passion <= 3 },
+            { id: 6, name: 'General Skills Development', description: 'Complete mandatory training modules', condition: (emp) => emp.trainingProgress < 80 },
+            { id: 7, name: 'Leadership Development', description: 'Advanced leadership and management skills', condition: (emp) => emp.title.toLowerCase().includes('manager') ||
+                emp.title.toLowerCase().includes('head') || emp.title.toLowerCase().includes('supervisor') },
+            { id: 8, name: 'New Employee Onboarding', description: 'Complete basic onboarding and orientation', condition: (emp) => emp.trainingProgress < 50 }
+        ];
+        const initialEmployees = [
+            { id: 1, name: "Sarah Johnson", title: "CEO", section: "WOMAN", manager: null, hireDate: "2020-01-15", dateOfBirth: "1985-03-12", photo: null, strengths: "Strategic thinking, Leadership", weaknesses: "Delegation", recommendation: "Excellent leader, ready for expansion", competencies: { english: 5, attitude: 5, knowledge: 5, punctuality: 4, passion: 5 }, trainingProgress: 95, trainingNeeded: [], managerNotes: "Outstanding performance consistently" },
+            { id: 2, name: "Michael Chen", title: "Operations Manager", section: "MAN", manager: 1, hireDate: "2020-03-20", dateOfBirth: "1982-07-18", photo: null, strengths: "Process optimization, 
+                Team management", weaknesses: "Public speaking", recommendation: "Strong operational skills", competencies: { english: 4, attitude: 5, knowledge: 5, punctuality: 5, passion: 4 }, trainingProgress: 88, trainingNeeded: [], managerNotes: "Reliable and efficient" },
+            { id: 3, name: "Emma Wilson", title: "Women's Department Head", section: "WOMAN", manager: 2, hireDate: "2021-02-10", dateOfBirth: "1990-11-25", photo: null, strengths: "Fashion sense, Customer relations", weaknesses: "Time management", recommendation: "Great potential for growth", competencies: { english: 4, attitude: 5, knowledge: 4, punctuality: 3, passion: 5 }, trainingProgress: 72, trainingNeeded: ["Time Management & Punctuality"], managerNotes: "Creative and customer-focused" },
+            { id: 4, name: "David Rodriguez", title: "Men's Department Head", section: "MAN", manager: 2, hireDate: "2021-01-05", dateOfBirth: "1988-04-14", photo: null, strengths: "Product knowledge, Sales", weaknesses: "Technology adoption", recommendation: "Solid performer", competencies: { english: 3, attitude: 4, knowledge: 5, punctuality: 4, passion: 4 }, trainingProgress: 65, trainingNeeded: ["English Communication", "Digital Skills"], managerNotes: "Strong sales results" },
+            { id: 5, name: "Lisa Park", title: "Kids Department Head", section: "KIDS", manager: 2, hireDate: "2021-06-15", dateOfBirth: "1992-09-08", photo: null, strengths: "Child psychology, 
+                Patience", weaknesses: "Inventory management", recommendation: "Excellent with families", competencies: { english: 4, attitude: 5, knowledge: 4, punctuality: 4, passion: 5 }, trainingProgress: 78, trainingNeeded: ["Inventory Management"], managerNotes: "Great with young customers" },
+            { id: 6, name: "Robert Kim", title: "Cashier Supervisor", section: "CASH", manager: 2, hireDate: "2020-11-20", dateOfBirth: "1987-12-03", photo: null, strengths: "Accuracy, Speed", weaknesses: "Leadership confidence", recommendation: "Reliable team member", competencies: { english: 3, attitude: 4, knowledge: 4, punctuality: 5, passion: 3 }, trainingProgress: 82, trainingNeeded: ["English Communication", "Leadership Development"], managerNotes: "Very dependable" },
+            { id: 7, name: "Jennifer Lee", title: "Stockroom Manager", section: "STOCKROOM", manager: 2, hireDate: "2020-08-10", dateOfBirth: "1989-05-22", photo: null, strengths: "Organization, Efficiency", weaknesses: "Customer interaction", recommendation: "Behind-the-scenes star", competencies: { english: 3, attitude: 4, knowledge: 5, punctuality: 5, passion: 4 }, trainingProgress: 90, trainingNeeded: ["English Communication", "Customer Service Excellence"], managerNotes: "Keeps everything running smoothly" }
+        ];
+        let employees = []; 
+        let availableTrainingTopics = []; 
+        let customTrainingTopics = [];
+        
+        // ====================================================================
+        // الدالة المعدلة: حفظ البيانات على الخادم بدلاً من LocalStorage
+        // ====================================================================
+        function saveData() {
+            const dataToSave = {
+                employees: employees,
+                customTrainingTopics: customTrainingTopics,
+                availableTrainingTopics: availableTrainingTopics
+            };
+
+            fetch(`${API_URL}/update`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(dataToSave),
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Server error on save');
+                }
+                return response.json();
+            })
+            .then(result => {
+                // console.log('Data saved successfully to Server.', result); 
+            })
+            .catch(error => {
+                console.error('Error saving data to Server:', error);
+                showToast('❌ Failed to save data. Please check server connection.', 'error');
+            });
+        }
+        
+        // ====================================================================
+        // الدالة المعدلة: تحميل البيانات من الخادم بدلاً من LocalStorage
+        // ====================================================================
+        function loadData() {
+            // إزالة كود LocalStorage
+            fetch(API_URL) 
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Failed to load data from server');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    employees = data.employees;
+                    customTrainingTopics = data.customTrainingTopics;
+                    availableTrainingTopics = data.availableTrainingTopics;
+                    
+                    console.log('✅ Data loaded successfully from Server.');
+                    // globalRefresh سيتم استدعاؤها في init
+                })
+                .catch(error => {
+                    console.error('❌ Error loading data from server. Using initial default data.', error);
+                    // في حالة فشل الخادم، نستخدم البيانات الافتراضية
+                    employees = initialEmployees;
+                    customTrainingTopics = initialCustomTrainingTopics;
+                    availableTrainingTopics = initialAvailableTrainingTopics;
+                });
+        }
+        
+        // ====================================================================
+        // NEW CODE: EXPORT/IMPORT FUNCTIONS (محتفظ بها كنسخة احتياطية)
+        // ====================================================================
+
+        // دالة لتصدير البيانات إلى ملف JSON (مازالت تعمل كما هي)
+        function exportData() {
+            const dataToExport = {
+               
+                employees: employees,
+                customTrainingTopics: customTrainingTopics,
+                availableTrainingTopics: availableTrainingTopics
+            };
+            const jsonString = JSON.stringify(dataToExport, null, 2);
+            const blob = new Blob([jsonString], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            // اسم الملف يحتوي على تاريخ اليوم
+            a.download = 'org_chart_data_' + new Date().toISOString().split('T')[0] + '.json';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            showToast('✅ تم تصدير البيانات بنجاح.');
+        }
+
+        // دالة لمعالجة ملف الاستيراد (مازالت تعمل كما هي)
+        function handleImport(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const importedData = JSON.parse(e.target.result);
+                    // تحقق بسيط من سلامة الملف
+                    if (importedData.employees && Array.isArray(importedData.employees) && importedData.availableTrainingTopics) {
+                        // تحديث البيانات العالمية (Global Data)
+                        employees = importedData.employees;
+                        customTrainingTopics = importedData.customTrainingTopics || [];
+                        availableTrainingTopics = importedData.availableTrainingTopics || [];
+                        // حفظ البيانات المستوردة إلى الخادم فوراً
+                        saveData(); 
+                        // تحديث واجهة المستخدم بالبيانات الجديدة
+                        globalRefresh(false);
+                        showToast('✅ تم استيراد البيانات وتحديثها بنجاح!', 'success');
+                    } else {
+                        showToast('❌ خطأ في تنسيق ملف البيانات المستورد.', 'error');
+                    }
+                } catch (error) {
+                    console.error("Error parsing imported file:", error);
+                    showToast('❌ تعذر قراءة الملف. تأكد من أنه ملف JSON سليم.', 'error');
+                }
+            };
+            reader.readAsText(file);
+        }
+        // ====================================================================
+        // END OF EXPORT/IMPORT FUNCTIONS
+        // ====================================================================
+
+
+        let currentZoom = 1;
+        let currentView = 'chart';
+        let refreshTimeout = null;
+        let unsavedChanges = {};
+        // Global refresh system - single source of truth
+        function globalRefresh(showToast = true) {
+            if (refreshTimeout) {
+                clearTimeout(refreshTimeout);
+            }
+            
+            refreshTimeout = setTimeout(() => {
+                recalculateAllMetrics();
+                refreshAllUIComponents();
+                
+                if (showToast) {
+      
+                    showToast('✅ Data updated successfully');
+                }
+                
+                refreshTimeout = null;
+            }, 300);
+        }
+
+        function recalculateAllMetrics() {
+            updateQuickStats();
+            populateManagerDropdowns();
+            populateTitleFilter();
+            const dashboardContent = document.getElementById('dashboardContent');
+            if (dashboardContent && dashboardContent.innerHTML.includes('Average Age')) {
+                showEmployeesAverageAge();
+            } else if (dashboardContent && dashboardContent.innerHTML.includes('Average Years of Service')) {
+                showAverageYearsOfService();
+            }
+        }
+
+        function refreshAllUIComponents() {
+            if (currentView === 'chart') {
+                renderOrgChart();
+            } else {
+                const dashboardContent = document.getElementById('dashboardContent');
+                if (dashboardContent && !dashboardContent.textContent.includes('Select an analytics option')) {
+                    const currentContent = dashboardContent.innerHTML;
+                    if (currentContent.includes('Competency Ranking')) {
+                        showCompetencyRanking();
+                    } else if (currentContent.includes('Training Needs Analysis')) {
+                        showTrainingNeeds();
+                    } else if (currentContent.includes('Top Talents')) {
+                        showTopTalents();
+                    } else if (currentContent.includes('Need Attention')) {
+                        showNeedAttention();
+                    } else if (currentContent.includes('Manage Training Topics')) {
+                        showManageTrainings();
+                    }
+                }
+            }
+        }
+
+        function showToast(message, type = 'success') {
+            const toast = document.createElement('div');
+            const bgColor = type === 'success' ? 'bg-green-600' : type === 'error' ? 'bg-red-600' : 'bg-blue-600';
+            toast.className = `fixed top-4 right-4 ${bgColor} text-white px-6 py-3 rounded-lg shadow-lg z-50 font-medium transform translate-x-full transition-transform duration-300`;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            setTimeout(() => {
+                toast.style.transform = 'translateX(0)';
+            }, 10);
+            setTimeout(() => {
+                toast.style.transform = 'translateX(100%)';
+                setTimeout(() => {
+                    if (toast.parentNode) {
+                        toast.parentNode.removeChild(toast);
+                
+                    }
+                }, 300);
+            }, 3000);
+        }
+
+        // Initialize the application
+        function init() {
+            // Load data from Server/Default data first
+            loadData();
+            // وضع التأخير ضروري لضمان تحميل البيانات من السيرفر قبل البدء بالـ render
+            setTimeout(() => {
+                populateManagerDropdowns();
+                populateTitleFilter();
+                renderOrgChart();
+                updateQuickStats();
+                setupEventListeners();
+            }, 500); // 500ms انتظار منطقي
+        }
+
+        function setupEventListeners() {
+            document.getElementById('searchInput').addEventListener('input', handleSearch);
+            document.getElementById('sectionFilter').addEventListener('change', handleFilters);
+            document.getElementById('titleFilter').addEventListener('change', handleFilters);
+            
+            document.getElementById('addEmployeeForm').addEventListener('submit', handleAddEmployee);
+            document.getElementById('addTrainingForm').addEventListener('submit', handleAddTraining);
+        }
+
+        function handleSearch() {
+            if (refreshTimeout) {
+                clearTimeout(refreshTimeout);
+            }
+            refreshTimeout = setTimeout(() => {
+                refreshAllUIComponents();
+                refreshTimeout = null;
+            }, 300);
+        }
+
+        function handleFilters() {
+            refreshAllUIComponents();
+        }
+
+        function populateManagerDropdowns() {
+            const managerSelects = document.querySelectorAll('#newManager, #editManager');
+            managerSelects.forEach(select => {
+                select.innerHTML = '<option value="">No Manager (CEO Level)</option>';
+                employees.forEach(emp => {
+                    const option = document.createElement('option');
+                    option.value = emp.id;
+             
+                    option.textContent = `${emp.name} - ${emp.title}`;
+                    select.appendChild(option);
+                });
+            });
+        }
+
+        function populateTitleFilter() {
+            const titleFilter = document.getElementById('titleFilter');
+            const titles = [...new Set(employees.map(emp => emp.title))];
+            
+            titleFilter.innerHTML = '<option value="">All Job Titles</option>';
+            titles.forEach(title => {
+                const option = document.createElement('option');
+                option.value = title;
+                option.textContent = title;
+                titleFilter.appendChild(option);
+            });
+        }
+
+        function toggleView(view) {
+            currentView = view;
+            if (view === 'chart') {
+                document.getElementById('chartView').classList.remove('hidden');
+                document.getElementById('dashboardView').classList.add('hidden');
+                document.getElementById('chartBtn').className = 'bg-gray-600 text-white text-sm px-3 py-2 rounded-lg hover:bg-gray-700 transition-colors';
+                document.getElementById('dashboardBtn').className = 'bg-gray-200 text-gray-700 text-sm px-3 py-2 rounded-lg hover:bg-gray-300 transition-colors';
+                renderOrgChart();
+            } else {
+                document.getElementById('chartView').classList.add('hidden');
+                document.getElementById('dashboardView').classList.remove('hidden');
+                document.getElementById('chartBtn').className = 'bg-gray-200 text-gray-700 text-sm px-3 py-2 rounded-lg hover:bg-gray-300 transition-colors';
+                document.getElementById('dashboardBtn').className = 'bg-gray-600 text-white text-sm px-3 py-2 rounded-lg hover:bg-gray-700 transition-colors';
+                updateQuickStats();
+            }
+        }
+
+        function renderOrgChart(filteredEmployees = employees) {
+            const chart = document.getElementById('orgChart');
+            chart.innerHTML = '';
+            
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            const sectionFilter = document.getElementById('sectionFilter').value.toUpperCase();
+            const titleFilter = document.getElementById('titleFilter').value;
+            const filtered = employees.filter(emp => {
+                const nameMatch = emp.name.toLowerCase().includes(searchTerm);
+                const sectionMatch = sectionFilter === '' || emp.section.toUpperCase() === sectionFilter;
+                const titleMatch = titleFilter === '' || emp.title === titleFilter;
+                return nameMatch && sectionMatch && titleMatch;
+     
+            });
+            
+            const hierarchy = buildHierarchy(filtered);
+            const positions = calculatePositions(hierarchy);
+            renderNodes(chart, positions, filtered);
+            renderLines(chart, positions, filtered);
+        }
+
+        function buildHierarchy(employeeList) {
+            const hierarchy = {};
+            const roots = [];
+            
+            employeeList.forEach(emp => {
+                hierarchy[emp.id] = { ...emp, children: [] };
+            });
+            employeeList.forEach(emp => {
+                if (emp.manager && hierarchy[emp.manager]) {
+                    hierarchy[emp.manager].children.push(hierarchy[emp.id]);
+                } else if (!emp.manager) {
+                    roots.push(hierarchy[emp.id]);
+                }
+  
+            });
+            
+            return { roots, hierarchy };
+        }
+
+        function calculatePositions(hierarchyData) {
+            const positions = {};
+            // تقليل عرض العقدة ليتناسب مع شاشات الموبايل بشكل أفضل
+            const nodeWidth = 180;
+            const nodeHeight = 80;
+            const levelHeight = 120;
+            const nodeSpacing = 20;
+            function positionLevel(nodes, level, startX = 0) {
+                let currentX = startX;
+                nodes.forEach(node => {
+                    const childrenWidth = node.children.length > 0 ? 
+                        (node.children.length * (nodeWidth + nodeSpacing)) - nodeSpacing : 0;
+                    
+                   
+                    const nodeX = Math.max(currentX, currentX + (childrenWidth - nodeWidth) / 2);
+                    
+                    positions[node.id] = {
+                        x: nodeX,
+                      
+                        y: level * levelHeight + 20,
+                        width: nodeWidth,
+                        height: nodeHeight
+                    };
+                    
+   
+                    if (node.children.length > 0) {
+                        // هنا يتم تحديد بداية رسم الأطفال لضمان توسيطهم تحت المدير
+                        const childStartX = nodeX - (childrenWidth - nodeWidth) / 2;
+            
+                        positionLevel(node.children, level + 1, childStartX);
+                    }
+                    
+                    // تحريك المؤشر X ليمر بعد العقدة التي تم وضعها وعقد أطفالها
+             
+                    currentX = Math.max(currentX + nodeWidth + nodeSpacing, nodeX + nodeWidth + nodeSpacing);
+                });
+            }
+            
+            positionLevel(hierarchyData.roots, 0);
+            // حساب الحجم الكلي للمخطط لضبط ارتفاع وعرض الحاوية
+            const allX = Object.values(positions).map(p => p.x + p.width);
+            const allY = Object.values(positions).map(p => p.y + p.height);
+            const chartWidth = Math.max(0, ...allX);
+            const chartHeight = Math.max(0, ...allY);
+            document.getElementById('orgChart').style.width = `${chartWidth + 50}px`;
+            document.getElementById('orgChart').style.height = `${chartHeight + 50}px`;
+
+            return positions;
+        }
+
+        function renderNodes(chart, positions, employeeList) {
+            employeeList.forEach(emp => {
+                if (!positions[emp.id]) return;
+                
+                const pos = positions[emp.id];
+                const node = document.createElement('div');
+  
+                node.className = `org-node bg-white border-2 rounded-lg p-3 shadow-lg hover:shadow-xl transition-shadow section-${emp.section.toLowerCase()}`;
+                node.style.left = pos.x + 'px';
+                node.style.top = pos.y + 'px';
+                node.style.width = pos.width + 'px';
+                
+                node.style.minHeight = pos.height + 'px';
+                node.onclick = () => showEmployeeCard(emp.id);
+                
+                const photo = emp.photo || getDefaultAvatar(emp.name);
+                
+                node.innerHTML = `
+     
+                <div class="flex items-center gap-3">
+                        <img src="${photo}" alt="${emp.name}" class="w-10 h-10 rounded-full object-cover border-2 border-white">
+                        <div class="flex-1 min-w-0">
+                        
+                    <div class="font-semibold text-sm truncate">${emp.name}</div>
+                            <div class="text-xs text-gray-600 truncate">${emp.title}</div>
+                            <div class="text-[10px] font-medium mt-1 px-2 py-[2px] rounded text-center">
+                           
+                        ${emp.section}
+                            </div>
+                        </div>
+                    </div>
+                `;
+                chart.appendChild(node);
+            });
+        }
+
+        function renderLines(chart, positions, employeeList) {
+            employeeList.forEach(emp => {
+                if (!emp.manager || !positions[emp.id] || !positions[emp.manager]) return;
+                
+                const childPos = positions[emp.id];
+               
+                const parentPos = positions[emp.manager];
+
+                // الخط العمودي من المدير
+                const vLine = document.createElement('div');
+                vLine.className = 'org-line';
+                vLine.style.left = (parentPos.x + parentPos.width / 2 - 1) + 'px';
+             
+                vLine.style.top = (parentPos.y + parentPos.height) + 'px';
+                vLine.style.width = '2px';
+                vLine.style.height = '30px'; // طول ثابت للخط العمودي الأول
+                chart.appendChild(vLine);
+
+                // الخط الأفقي لربط الزملاء
+             
+                const hLine = document.createElement('div');
+                hLine.className = 'org-line';
+                const leftX = Math.min(parentPos.x + parentPos.width / 2, childPos.x + childPos.width / 2);
+                const rightX = Math.max(parentPos.x + parentPos.width / 2, childPos.x + childPos.width / 2);
+                hLine.style.left = leftX + 'px';
+                hLine.style.top = (parentPos.y + parentPos.height + 30 - 1) + 'px';
+                hLine.style.width = (rightX - leftX + 2) + 'px';
+                // +2 للتغطية الكاملة للخطوط العمودية
+                hLine.style.height = '2px';
+                chart.appendChild(hLine);
+
+                // الخط العمودي النازل للموظف
+                const vLine2 = document.createElement('div');
+                vLine2.className = 'org-line';
+                vLine2.style.left = (childPos.x + childPos.width / 2 - 1) + 'px';
+                vLine2.style.top = (parentPos.y + parentPos.height + 30) + 'px';
+                vLine2.style.width = '2px';
+                vLine2.style.height = (childPos.y - parentPos.y - parentPos.height - 30) + 'px';
+                chart.appendChild(vLine2);
+            });
+        }
+
+        function getDefaultAvatar(name) {
+            const firstLetter = name.charAt(0).toUpperCase();
+            const colors = ['#3B82F6', '#EF4444', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899'];
+            const colorIndex = name.length % colors.length;
+            const color = colors[colorIndex];
+            return `data:image/svg+xml,${encodeURIComponent(`
+                <svg width="40" height="40" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="20" cy="20" r="20" fill="${color}"/>
+                    <text x="20" y="27" text-anchor="middle" fill="white" font-family="Arial" font-size="16" font-weight="bold">${firstLetter}</text>
+                </svg>
+            `)}`;
+        }
+
+        function calculateAverageCompetency(competencies) {
+            const values = Object.values(competencies);
+            const sum = values.reduce((a, b) => a + b, 0);
+            return values.length > 0 ? sum / values.length : 0;
+        }
+
+        function updateRatingUI(employeeId, competency, rating) {
+            const label = document.getElementById(`label-${employeeId}-${competency}`);
+            if (label) {
+                label.textContent = `Rating: ${rating} / 5`;
+            }
+
+            const avgElement = document.getElementById(`avgCompetency-${employeeId}`);
+            if (avgElement) {
+                const employee = employees.find(emp => emp.id === employeeId);
+                const newAvg = calculateAverageCompetency(employee.competencies);
+                avgElement.textContent = `Competency Ratings (Avg: ${newAvg.toFixed(1)}⭐)`;
+            }
+            // نعيد فتح البطاقة للتحديث الكامل للتنسيق
+            showEmployeeCard(employeeId);
+        }
+
+        function setRating(employeeId, competency, rating) {
+            const employee = employees.find(emp => emp.id === employeeId);
+            if (employee) {
+                employee.competencies[competency] = rating;
+                saveData(); 
+                globalRefresh(false); 
+                
+                updateRatingUI(employeeId, competency, rating);
+            }
+        }
+        
+        function showHover(employeeId, competency, rating) {
+            const tooltip = document.getElementById(`tooltip-${employeeId}-${competency}`);
+            if (tooltip) {
+                tooltip.textContent = `Rate: ${rating}/5`;
+                tooltip.classList.add('show');
+            }
+        }
+
+        function clearHover(employeeId, competency) {
+            const tooltip = document.getElementById(`tooltip-${employeeId}-${competency}`);
+            if (tooltip) {
+                tooltip.classList.remove('show');
+            }
+        }
+
+        function updateEmployee(id, key, value) {
+            const employee = employees.find(emp => emp.id === id);
+            if (!employee) return;
+            
+            const val = ['manager', 'trainingProgress'].includes(key) ? (value ? parseInt(value) : null) : value;
+
+            employee[key] = val;
+
+            saveData();
+            globalRefresh(false);
+            
+            if (key === 'trainingProgress') {
+                document.getElementById(`progressBar-${id}`).style.width = `${val}%`;
+                document.getElementById(`progressText-${id}`).textContent = `${val}%`;
+            }
+        }
+
+        // ====================================================================
+        // الدالة المعدلة: لرفع الصورة إلى الخادم وتحديث المسار
+        // ====================================================================
+        function handlePhotoUpdate(employeeId, fileInput) {
+            const file = fileInput.files[0];
+            if (!file) return;
+
+            // 1. استخدام FormData لإرسال الملف
+            const formData = new FormData();
+            formData.append('newPhoto', file); 
+
+            fetch(`http://localhost:3000/api/employees/${employeeId}/upload-photo`, {
+                method: 'POST',
+                body: formData, 
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Server error on photo upload');
+                }
+                return response.json();
+            })
+            .then(data => {
+                const employee = employees.find(emp => emp.id === employeeId);
+                if (employee) {
+                    // 2. تحديث حقل photo بالرابط الجديد الذي أرسله الخادم (http://localhost:3000/filename.jpg)
+                    employee.photo = data.photo; 
+                    // الخادم حفظ البيانات بالفعل، لذلك لا نستدعي saveData()
+                    showEmployeeCard(employeeId); 
+                    globalRefresh(false);
+                    showToast('✅ Profile photo updated and saved to Server.');
+                }
+            })
+            .catch(error => {
+                console.error('Error uploading photo:', error);
+                showToast('❌ Failed to upload photo to server.', 'error');
+            });
+        }
+        // ====================================================================
+        // نهاية تعديل دالة الصورة
+        // ====================================================================
+
+        function removeEmployee(employeeId) {
+            if (!confirm("Are you sure you want to remove this employee? All their subordinates will lose their direct manager connection.")) {
+                return;
+            }
+
+            const employeeToRemove = employees.find(e => e.id === employeeId);
+            if (!employeeToRemove) return;
+
+            employees.forEach(e => {
+                if (e.manager === employeeId) {
+                    e.manager = employeeToRemove.manager; 
+                }
+            });
+            employees = employees.filter(e => e.id !== employeeId);
+
+            closeEmployeeModal();
+
+            saveData();
+            globalRefresh(true);
+        }
+
+        // ====================================================================
+        // الدالة المعدلة: إضافة موظف جديد (لا تغيير كبير)
+        // ====================================================================
+        function handleAddEmployee(event) {
+            event.preventDefault();
+            const form = event.target;
+            const newName = form.querySelector('#newName').value;
+            const newTitle = form.querySelector('#newTitle').value;
+            const newSection = form.querySelector('#newSection').value;
+            const newManagerId = form.querySelector('#newManager').value;
+            const newPhotoInput = form.querySelector('#newPhoto');
+            
+            const newId = Math.max(0, ...employees.map(e => e.id)) + 1;
+            const defaultCompetencies = { english: 3, attitude: 3, knowledge: 3, punctuality: 3, passion: 3 };
+            
+            const createAndSaveEmployee = (base64Photo = null) => {
+                const newEmployee = {
+                    id: newId,
+                    name: newName,
+                    title: newTitle,
+           
+                    section: newSection,
+                    manager: newManagerId ?
+                        parseInt(newManagerId) : null,
+                    hireDate: new Date().toISOString().split('T')[0],
+                    dateOfBirth: '',
+                    photo: base64Photo, // يتم حفظها مؤقتاً هنا
+                    strengths: 'New employee - Strengths pending review',
+        
+                    weaknesses: 'New employee - Weaknesses pending review',
+                    recommendation: 'New employee - Recommendation pending review',
+                    competencies: defaultCompetencies,
+                    trainingProgress: 0,
+              
+                    trainingNeeded: [],
+                    managerNotes: ''
+                };
+                employees.push(newEmployee);
+                closeAddEmployeeModal();
+                form.reset();
+                // يتم حفظ البيانات التي تتضمن الصورة المشفرة Base64 مؤقتاً
+                saveData(); 
+                globalRefresh(true);
+
+                // *** ملاحظة: لو أردنا رفع الصورة إلى الخادم يجب استخدام دالة منفصلة هنا ***
+                // لكننا حافظنا على الطريقة القديمة (Base64) لضمان عدم تعقيد إضافة الموظف
+                // سيتم التعامل مع مسار الصورة بشكل صحيح عند تحميلها لاحقاً
+            };
+
+            if (newPhotoInput.files.length > 0) {
+                // نستخدم Base64 مؤقتاً، ويفضل أن يقوم المستخدم بتحديث الصورة بعد الإضافة
+                const reader = new FileReader();
+                reader.onload = (e) => createAndSaveEmployee(e.target.result);
+                reader.readAsDataURL(newPhotoInput.files[0]);
+            } else {
+                createAndSaveEmployee(null);
+            }
+        }
+        // ====================================================================
+        // نهاية تعديل دالة إضافة موظف
+        // ====================================================================
+
+        function handleAddTraining(event) {
+            event.preventDefault();
+            const form = event.target;
+            const name = form.querySelector('#trainingName').value.trim();
+            const description = form.querySelector('#trainingDescription').value.trim();
+            if (!name) {
+                showToast('Training name is required.', 'error');
+                return;
+            }
+            
+            const isDuplicate = availableTrainingTopics.some(t => t.toLowerCase() === name.toLowerCase());
+            if (isDuplicate) {
+                showToast('This training topic already exists.', 'error');
+                return;
+            }
+
+            availableTrainingTopics.push(name);
+            const newId = Math.max(0, ...customTrainingTopics.map(t => t.id)) + 1;
+            customTrainingTopics.push({
+                id: newId,
+                name: name,
+                description: description,
+                condition: (emp) => false
+            });
+            closeAddTrainingModal();
+            form.reset();
+            
+            saveData();
+            globalRefresh(true);
+        }
+
+        function toggleTrainingSelection(employeeId, topic) {
+            const employee = employees.find(emp => emp.id === employeeId);
+            if (!employee) return;
+            
+            if (!employee.trainingNeeded) employee.trainingNeeded = [];
+            
+            const index = employee.trainingNeeded.indexOf(topic);
+            if (index > -1) {
+                employee.trainingNeeded.splice(index, 1);
+            } else {
+                employee.trainingNeeded.push(topic);
+            }
+            
+            saveData();
+            showEmployeeCard(employeeId); 
+        }
+        
+        function removeTrainingFromEmployee(employeeId, topic) {
+            const employee = employees.find(emp => emp.id === employeeId);
+            if (!employee) return;
+            
+            if (!employee.trainingNeeded) employee.trainingNeeded = [];
+            
+            const index = employee.trainingNeeded.indexOf(topic);
+            if (index > -1) {
+                employee.trainingNeeded.splice(index, 1);
+            }
+            
+            saveData();
+            showEmployeeCard(employeeId); 
+        }
+
+        function addNewTrainingTopic(employeeId) {
+            const input = document.getElementById(`newTrainingInput-${employeeId}`);
+            const topic = input.value.trim();
+            
+            if (!topic) {
+                showToast('Topic name is required.', 'error');
+                return;
+            }
+            
+            const isDuplicate = availableTrainingTopics.some(t => t.toLowerCase() === topic.toLowerCase());
+            if (isDuplicate) {
+                showToast('This training topic already exists.', 'error');
+                return;
+            }
+
+            availableTrainingTopics.push(topic);
+            const newId = Math.max(0, ...customTrainingTopics.map(t => t.id)) + 1;
+            customTrainingTopics.push({ id: newId, name: topic, description: '', condition: (emp) => false });
+            toggleTrainingSelection(employeeId, topic); 
+            
+            input.value = ''; 
+        }
+
+        function getAvailableTrainingTopics() {
+            return availableTrainingTopics.sort();
+        }
+
+        // ====================================================================
+        // UPDATED MODAL FUNCTIONS (FIX) - تم التأكد من ثباتها
+        // ====================================================================
+
+        function closeEmployeeModal() {
+            document.getElementById('employeeModal').style.display = 'none';
+        }
+
+        function showAddEmployeeModal() {
+            document.getElementById('addEmployeeModal').style.display = 'flex';
+            // Ensure manager list is up to date when modal opens
+            populateManagerDropdowns();
+        }
+
+        function closeAddEmployeeModal() {
+            document.getElementById('addEmployeeModal').style.display = 'none';
+            document.getElementById('addEmployeeForm').reset();
+        }
+
+        function showAddTrainingModal() {
+            document.getElementById('addTrainingModal').style.display = 'flex';
+        }
+
+        function closeAddTrainingModal() {
+            document.getElementById('addTrainingModal').style.display = 'none';
+            document.getElementById('addTrainingForm').reset();
+        }
+        
+        // ====================================================================
+        // END OF UPDATED MODAL FUNCTIONS
+        // ====================================================================
+
+
+        function updateEmployeeData(employeeId) {
+            closeEmployeeModal();
+            showToast('✅ Employee data updated and saved successfully.');
+        }
+
+        function showEmployeeCard(employeeId) {
+            const employee = employees.find(emp => emp.id === employeeId);
+            if (!employee) return;
+            
+            const modal = document.getElementById('employeeModal');
+            const content = document.getElementById('employeeCardContent');
+            const photo = employee.photo || getDefaultAvatar(employee.name);
+            const avgCompetency = calculateAverageCompetency(employee.competencies);
+
+            content.innerHTML = `
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div class="space-y-6">
+                        <div class="text-center">
+                            
+                            <div class="relative inline-block">
+                                <img src="${photo}" alt="${employee.name}" class="w-24 h-24 rounded-full object-cover border-4 border-gray-200 mx-auto">
+                                <label for="changePhotoInput-${employee.id}" class="absolute bottom-0 right-0 bg-blue-600 text-white rounded-full p-2 hover:bg-blue-700 transition-colors cursor-pointer">
+              
+                                    📷
+                                </label>
+                                <input type="file" id="changePhotoInput-${employee.id}" accept="image/*" class="hidden" onchange="handlePhotoUpdate(${employee.id}, this)">
+        
+                            </div>
+                            <h3 class="text-xl font-bold mt-4">${employee.name}</h3>
+                            <p class="text-gray-600">${employee.title}</p>
+                    
+                            <span class="inline-block px-3 py-1 rounded-full text-sm font-medium section-${employee.section.toLowerCase()}">${employee.section}</span>
+                        </div>
+                        <div class="space-y-4">
+                            <div>
+        
+                                <label class="block text-sm font-medium mb-1">Hire Date</label>
+                                <input type="date" value="${employee.hireDate}" onchange="updateEmployee(${employee.id}, 'hireDate', this.value)" class="w-full px-3 py-2 border rounded-lg">
+                            </div>
+ 
+                            <div>
+                                <label class="block text-sm font-medium mb-1">Date of Birth</label>
+                                <input type="date" value="${employee.dateOfBirth 
+                                    || ''}" onchange="updateEmployee(${employee.id}, 'dateOfBirth', this.value)" class="w-full px-3 py-2 border rounded-lg">
+                            </div>
+                            <div>
+                                <label for="editManager" class="block 
+                                    text-sm font-medium mb-1">Direct Manager</label>
+                                <select id="editManager" onchange="updateEmployee(${employee.id}, 'manager', this.value)" class="w-full px-3 py-2 border rounded-lg">
+                                    <option value="">No Manager (CEO Level)</option>
+                
+                                    ${employees.filter(emp => emp.id !== employee.id).map(emp => 
+                                        `<option value="${emp.id}" ${emp.id == employee.manager ? 'selected' : ''}>${emp.name} - ${emp.title}</option>`
+                        
+                                    ).join('')}
+                                </select>
+                            </div>
+                            
+                            <div>
+                                <label class="block text-sm font-medium mb-1">Strengths</label>
+                                <textarea onchange="updateEmployee(${employee.id}, 'strengths', this.value)" class="w-full px-3 py-2 border rounded-lg" rows="2">${employee.strengths}</textarea>
+                       
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium mb-1">Weaknesses</label>
+                               
+                                <textarea onchange="updateEmployee(${employee.id}, 'weaknesses', this.value)" class="w-full px-3 py-2 border rounded-lg" rows="2">${employee.weaknesses}</textarea>
+                            </div>
+                            <div>
+                                <label class="block 
+                                    text-sm font-medium mb-1">Manager Recommendation</label>
+                                <textarea onchange="updateEmployee(${employee.id}, 'recommendation', this.value)" class="w-full px-3 py-2 border rounded-lg" rows="2">${employee.recommendation}</textarea>
+                            </div>
+                        </div>
+    
+                    </div>
+                    <div class="space-y-6">
+                        <div>
+                            <h4 id="avgCompetency-${employee.id}" class="text-lg font-semibold mb-4">Competency Ratings (Avg: ${avgCompetency.toFixed(1)}⭐)</h4>
+    
+                            <div class="space-y-4">
+                                ${Object.entries({ 
+                                    english: 'English Level', 
+   
+                                    attitude: 'Attitude with Team & Customers', 
+                                    knowledge: 'Product Knowledge', 
+                      
+                                    punctuality: 'Punctuality', 
+                                    passion: 'Passion' 
+                                }).map(([key, label]) => { 
+          
+                                    const currentRating = employee.competencies[key];
+                                    return `
+                                        <div class="competency-group">
+                                            <div class="flex justify-between items-center mb-1">
+          
+                                                <span class="text-sm font-medium">${label}</span>
+                                                <div class="star-rating" data-employee="${employee.id}" data-competency="${key}" onmouseleave="clearHover(${employee.id}, '${key}')">
+       
+                                                    <div class="rating-tooltip" id="tooltip-${employee.id}-${key}"></div>
+                                                    ${[1,2,3,4,5].map(star 
+                                                        => `
+                                                        <span class="star ${star <= currentRating ? 'filled' : ''}" data-rating="${star}" onmouseenter="showHover(${employee.id}, '${key}', ${star})" onclick="setRating(${employee.id}, '${key}', ${star})">⭐</span>
+                            
+                                                    `).join('')}
+                                                </div>
+                            
+                                            </div>
+                                            <div class="rating-label" id="label-${employee.id}-${key}"> Rating: ${currentRating} / 5 </div>
+                                 
+                                        </div>
+                                    `;
+                                }).join('')}
+                            </div>
+                        </div>
+                        <div>
+                        
+                            <h4 class="text-lg font-semibold mb-4">Performance Trend</h4>
+                            <div class="chart-container">
+                                ${generateTrendChart(employee)}
+                            </div>
+   
+                        </div>
+                        <div>
+                            <h4 class="text-lg font-semibold mb-4">Training Progress</h4>
+                       
+                            <div class="flex items-center gap-4">
+                                <div class="flex-1 bg-gray-200 rounded-full h-4">
+                                    <div id="progressBar-${employee.id}" class="bg-green-500 h-4 rounded-full transition-all duration-300" style="width: ${employee.trainingProgress}%"></div>
+            
+                                </div>
+                                <span id="progressText-${employee.id}" class="text-sm font-medium">${employee.trainingProgress}%</span>
+                            </div>
+                 
+                            <input id="progressSlider-${employee.id}" type="range" min="0" max="100" value="${employee.trainingProgress}" onchange="updateEmployee(${employee.id}, 'trainingProgress', this.value)" class="w-full mt-2">
+                        </div>
+                        <div>
+                            <label class="block text-sm 
+                                font-medium mb-1">Training Needed</label>
+                            <div class="relative">
+                                <div id="trainingNeededContainer-${employee.id}" class="min-h-12 border rounded-lg p-2 bg-white cursor-pointer" onclick="toggleTrainingDropdown(${employee.id})">
+                             
+                                    <div id="selectedTrainings-${employee.id}" class="flex flex-wrap gap-2 mb-2">
+                                        ${(employee.trainingNeeded ||
+                                            []).map(training => `
+                                            <span class="bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-sm flex items-center gap-1">
+                                             
+                                                ${training} 
+                                                <button onclick="removeTrainingFromEmployee(${employee.id}, '${training}'); event.stopPropagation();" class="text-blue-600 hover:text-blue-800 ml-1">×</button>
+                                          
+                                            </span>
+                                        `).join('')}
+                                    </div>
+                      
+                                    <div class="text-gray-500 text-sm ${(employee.trainingNeeded || []).length > 0 ? 'hidden' : ''}">Click to select training topics...</div>
+                                </div>
+                                <div id="trainingDropdown-${employee.id}" class="hidden absolute top-full left-0 right-0 
+                                    bg-white border border-gray-300 rounded-lg shadow-lg z-50 max-h-60 overflow-y-auto">
+                                    <div class="p-2 border-b">
+                                        <div class="flex gap-2">
+             
+                                            <input type="text" id="newTrainingInput-${employee.id}" placeholder="Add new training topic..." class="flex-1 px-2 py-1 border rounded text-sm">
+                                            <button onclick="addNewTrainingTopic(${employee.id})" type="button" class="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700">Add</button>
+    
+                                        </div>
+                                    </div>
+                            
+                                    <div id="trainingOptions-${employee.id}" class="p-1">
+                                        ${getAvailableTrainingTopics().map(topic => `
+                                            <div class="flex items-center gap-2 
+                                                p-2 hover:bg-gray-50 cursor-pointer" onclick="toggleTrainingSelection(${employee.id}, '${topic}')">
+                                                <input type="checkbox" ${((employee.trainingNeeded ||
+                                                    []).includes(topic) ? 'checked' : '')} class="training-checkbox" disabled>
+                                                <span class="text-sm">${topic}</span>
+                                            </div>
+ 
+                                        `).join('')}
+                                    </div>
+                         
+                                </div>
+                            </div>
+                        </div>
+                        <div>
+                 
+                            <label class="block text-sm font-medium mb-1">Manager Notes</label>
+                            <textarea onchange="updateEmployee(${employee.id}, 'managerNotes', this.value)" class="w-full px-3 py-2 border rounded-lg" rows="3">${employee.managerNotes}</textarea>
+                        </div>
+                       
+                        <div class="flex gap-4 pt-4">
+                            <button onclick="updateEmployeeData(${employee.id})" class="bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 transition-colors font-semibold text-lg"> 
+                                CLOSE & SAVE
+                       
+                            </button> 
+                            <button onclick="removeEmployee(${employee.id})" class="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors">
+                                Remove Employee
+                         
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            window.toggleTrainingDropdown = function(employeeId) {
+                const dropdown = document.getElementById(`trainingDropdown-${employeeId}`);
+                dropdown.classList.toggle('hidden');
+            }
+
+            document.getElementById(`changePhotoInput-${employee.id}`).onchange = function() {
+                handlePhotoUpdate(employee.id, this);
+            };
+
+            // Use direct style for reliability
+            modal.style.display = 'flex';
+        }
+
+        function generateTrendChart(employee) {
+            const quarters = ['Q1', 'Q2', 'Q3', 'Q4'];
+            const avgComp = calculateAverageCompetency(employee.competencies);
+            const data = quarters.map((q, i) => ({ quarter: q, value: Math.max(1, avgComp + (Math.random() - 0.5) * 0.8) }));
+            const maxValue = 5;
+            const chartWidth = 268;
+            const chartHeight = 168;
+            const padding = 20;
+            const points = data.map((d, i) => { 
+                const x = padding + (i * (chartWidth - 2 * padding)) / (data.length - 1);
+                const y = chartHeight - padding - ((d.value / maxValue) * (chartHeight - 2 * padding));
+                return `${x},${y}`; 
+            }).join(' 
+');
+
+            return `
+                <svg width="100%" height="100%" viewBox="0 0 ${chartWidth} ${chartHeight}">
+                    ${[1,2,3,4,5].map(i => `
+                        <line x1="${padding}" y1="${chartHeight - padding - ((i / maxValue) * (chartHeight - 2 * padding))}" x2="${chartWidth - padding}" y2="${chartHeight - padding - ((i / maxValue) * (chartHeight - 2 * padding))}" stroke="#e5e7eb" stroke-width="1"/>
+                        <text x="10" y="${chartHeight - padding - ((i / maxValue) * (chartHeight - 2 * padding)) + 4}" font-size="10" fill="#6b7280">${i}</text>
+                    `).join('')}
+                    <polyline points="${points}" class="trend-line"/>
+              
+                    ${data.map((d, i) => { 
+                        const x = padding + (i * (chartWidth - 2 * padding)) / (data.length - 1);
+                        const y = chartHeight - padding - ((d.value / maxValue) * (chartHeight - 2 * padding));
+            
+                        return `<circle cx="${x}" cy="${y}" r="3" fill="#3b82f6"/>`;
+                    }).join('')}
+                    ${quarters.map((q, i) => {
+                        const x = padding + (i * (chartWidth - 2 * padding)) / (data.length - 1);
+                        return `<text x="${x}" y="${chartHeight - 5}" text-anchor="middle" font-size="10" fill="#6b7280">${q}</text>`;
+      
+                    }).join('')}
+                </svg>
+            `;
+        }
+
+        function updateQuickStats() { /* Logic to update stats goes here */ }
+        function showCompetencyRanking() { document.getElementById('dashboardContent').innerHTML = '<h3>Competency Ranking Report</h3><p>Report logic here...</p>';
+        }
+        function showTrainingNeeds() { document.getElementById('dashboardContent').innerHTML = '<h3>Training Needs Analysis</h3><p>Analysis logic here...</p>';
+        }
+        function showTopTalents() { document.getElementById('dashboardContent').innerHTML = '<h3>Top Talents Report</h3><p>Report logic here...</p>';
+        }
+        function showNeedAttention() { document.getElementById('dashboardContent').innerHTML = '<h3>Need Attention Report</h3><p>Report logic here...</p>';
+        }
+        function showEmployeesAverageAge() { document.getElementById('dashboardContent').innerHTML = '<h3>Employees Average Age</h3><p>Age calculation logic here...</p>';
+        }
+        function showAverageYearsOfService() { document.getElementById('dashboardContent').innerHTML = '<h3>Average Years of Service</h3><p>Service calculation logic here...</p>';
+        }
+        function showManageTrainings() { 
+             let listHtml = availableTrainingTopics.map(topic => `
+                <div class="flex justify-between items-center p-2 border-b">
+                    <span>${topic}</span>
+                    <button onclick="removeTrainingTopic('${topic}')" class="text-red-500 hover:text-red-700">Remove</button>
+       
+                </div>
+            `).join('');
+            document.getElementById('dashboardContent').innerHTML = `
+                <h3>Manage Training Topics</h3>
+                <div class="mt-4">${listHtml}</div>
+                <button onclick="showAddTrainingModal()" class="mt-4 bg-purple-500 text-white px-4 py-2 rounded-lg hover:bg-purple-600 transition-colors">Add New Topic</button>
+            `;
+        }
+
+        function removeTrainingTopic(topic) {
+            if (confirm(`Are you sure you want to remove the training topic: ${topic}?`)) {
+                availableTrainingTopics = availableTrainingTopics.filter(t => t !== topic);
+                customTrainingTopics = customTrainingTopics.filter(t => t.name !== topic);
+                
+                employees.forEach(emp => {
+                    if (emp.trainingNeeded) {
+                        emp.trainingNeeded = emp.trainingNeeded.filter(t => t !== topic);
+                    }
+                });
+                saveData();
+                showManageTrainings(); 
+                globalRefresh(true);
+            }
+        }
+        
+        function zoomIn() {
+            currentZoom = Math.min(2, currentZoom + 0.1);
+            document.getElementById('orgChart').style.transform = `scale(${currentZoom})`;
+        }
+
+        function zoomOut() {
+            currentZoom = Math.max(0.5, currentZoom - 0.1);
+            document.getElementById('orgChart').style.transform = `scale(${currentZoom})`;
+        }
+
+        function resetZoom() {
+            currentZoom = 1;
+            document.getElementById('orgChart').style.transform = `scale(${currentZoom})`;
+        }
+
+        // Initialize the application
+        init();
+    </script>
+</body>
+</html>
